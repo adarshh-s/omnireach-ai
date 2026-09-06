@@ -1,0 +1,6 @@
+{
+  "name": "OmniReach AI - Excel WhatsApp & Email Automation",
+  "description": "Automated omnichannel outreach platform that ingests Excel spreadsheets and automatically dispatches AI-personalized WhatsApp messages and Emails to clients with calendar booking links.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
