@@ -6,10 +6,16 @@ import { SheetsView } from './components/SheetsView';
 import { CalendarView } from './components/CalendarView';
 import { CampaignAnalytics } from './components/CampaignAnalytics';
 import { N8nWorkflowView } from './components/N8nWorkflowView';
+import { ConversationsView } from './components/ConversationsView';
+import { DashboardView } from './components/DashboardView';
 import { ArchitectureView } from './components/ArchitectureView';
 import { TemplateManagerView } from './components/TemplateManagerView';
 import { ExcelUploadModal } from './components/ExcelUploadModal';
 import { ChannelConfigModal } from './components/ChannelConfigModal';
+import { AuthGate } from './components/AuthGate';
+import { AuthState } from './hooks/useAuth';
+import { useCloudSettings } from './hooks/useCloudSettings';
+import { useCloudClients } from './hooks/useCloudClients';
 import {
   Lead,
   CalendarSlot,
@@ -30,7 +36,11 @@ const DEFAULT_CHANNEL_SETTINGS: ChannelApiSettings = {
 };
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<ActiveTab>('campaign');
+  return <AuthGate>{(auth) => <AppContent auth={auth} />}</AuthGate>;
+}
+
+function AppContent({ auth }: { auth: AuthState }) {
+  const [activeTab, setActiveTab] = useState<ActiveTab>('dashboard');
 
   // Leads State with LocalStorage Persistence
   const [leads, setLeads] = useState<Lead[]>(() => {
@@ -48,6 +58,30 @@ export default function App() {
     return INITIAL_LEADS;
   });
 
+  // Clients (Lead[]) sync with Supabase, scoped to the signed-in org — same
+  // graceful-degradation pattern as campaignSettings/channelSettings: falls back
+  // to the localStorage-backed state above when Supabase/auth isn't available.
+  const cloudClients = useCloudClients(auth.user?.id);
+  const loadedClientsForUser = React.useRef<string | null>(null);
+  useEffect(() => {
+    const userId = auth.user?.id;
+    if (!userId || loadedClientsForUser.current === userId) return;
+    loadedClientsForUser.current = userId;
+    cloudClients.loadClients().then((loaded) => {
+      if (loaded !== null) setLeads(loaded);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [auth.user?.id]);
+
+  useEffect(() => {
+    if (!auth.user?.id) return;
+    const timer = setTimeout(() => {
+      cloudClients.syncClients(leads);
+    }, 600);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [leads, auth.user?.id]);
+
   // Calendar Slots State
   const [calendarSlots, setCalendarSlots] = useState<CalendarSlot[]>(() => {
     if (typeof window !== 'undefined') {
@@ -61,18 +95,20 @@ export default function App() {
     return INITIAL_CALENDAR_SLOTS;
   });
 
-  // Campaign Settings
-  const [campaignSettings, setCampaignSettings] = useState<CampaignSettings>(() => {
-    if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('omnireach_campaign_settings_v1');
-      if (saved) {
-        try {
-          return JSON.parse(saved);
-        } catch {}
-      }
-    }
-    return DEFAULT_CAMPAIGN_SETTINGS;
-  });
+  // Campaign identity/settings & channel credentials — synced to Supabase per
+  // organization when signed in (multi-tenant dashboard), else localStorage only.
+  const [campaignSettings, setCampaignSettings] = useCloudSettings<CampaignSettings>(
+    'org_profile',
+    'omnireach_campaign_settings_v1',
+    DEFAULT_CAMPAIGN_SETTINGS,
+    auth.user?.id
+  );
+  const [channelSettings, setChannelSettings] = useCloudSettings<ChannelApiSettings>(
+    'org_channel_settings',
+    'omnireach_channels_v1',
+    DEFAULT_CHANNEL_SETTINGS,
+    auth.user?.id
+  );
 
   // Templates
   const [templates, setTemplates] = useState<MessageTemplate[]>(() => {
@@ -87,25 +123,30 @@ export default function App() {
     return DEFAULT_TEMPLATES;
   });
 
-  // Channel API Settings
-  const [channelSettings, setChannelSettings] = useState<ChannelApiSettings>(() => {
-    if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('omnireach_channels_v1');
-      if (saved) {
-        try {
-          return JSON.parse(saved);
-        } catch {}
-      }
-    }
-    return DEFAULT_CHANNEL_SETTINGS;
-  });
-
   // Modals State
   const [isExcelModalOpen, setIsExcelModalOpen] = useState(false);
   const [isChannelModalOpen, setIsChannelModalOpen] = useState(false);
 
   // Selected Lead for Simulator
   const [selectedLeadId, setSelectedLeadId] = useState<string>(leads[0]?.id || 'lead-1');
+
+  // Google Calendar OAuth redirect banner
+  const [calendarBanner, setCalendarBanner] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const status = params.get('google_calendar');
+    if (status === 'connected') {
+      setCalendarBanner({ type: 'success', message: 'Google Calendar connected — the AI booking bot can now schedule real meetings.' });
+    } else if (status === 'error') {
+      setCalendarBanner({ type: 'error', message: params.get('message') || 'Failed to connect Google Calendar.' });
+    }
+    if (status) {
+      params.delete('google_calendar');
+      params.delete('message');
+      const newSearch = params.toString();
+      window.history.replaceState({}, '', window.location.pathname + (newSearch ? `?${newSearch}` : ''));
+    }
+  }, []);
 
   // Sync to LocalStorage
   useEffect(() => {
@@ -117,19 +158,8 @@ export default function App() {
   }, [calendarSlots]);
 
   useEffect(() => {
-    localStorage.setItem(
-      'omnireach_campaign_settings_v1',
-      JSON.stringify(campaignSettings)
-    );
-  }, [campaignSettings]);
-
-  useEffect(() => {
     localStorage.setItem('omnireach_templates_v1', JSON.stringify(templates));
   }, [templates]);
-
-  useEffect(() => {
-    localStorage.setItem('omnireach_channels_v1', JSON.stringify(channelSettings));
-  }, [channelSettings]);
 
   // Lead CRUD handlers
   const handleUpdateLead = (updated: Lead) => {
@@ -256,6 +286,8 @@ export default function App() {
         onSaveSettings={setChannelSettings}
         campaignSettings={campaignSettings}
         availableSlots={calendarSlots}
+        userId={auth.user?.id}
+        accessToken={auth.accessToken}
       />
 
       {/* Main Header with Navigation */}
@@ -265,10 +297,28 @@ export default function App() {
         pendingCount={pendingCount}
         scheduledCount={scheduledCount}
         onOpenExcelUpload={() => setIsExcelModalOpen(true)}
+        onOpenChannelConfig={() => setIsChannelModalOpen(true)}
       />
+
+      {calendarBanner && (
+        <div
+          className={`px-4 sm:px-6 lg:px-8 py-2 text-xs flex items-center justify-between ${
+            calendarBanner.type === 'success' ? 'bg-[#8BA888]/15 text-[#375534]' : 'bg-rose-50 text-rose-700'
+          }`}
+        >
+          <span>{calendarBanner.message}</span>
+          <button onClick={() => setCalendarBanner(null)} className="opacity-70 hover:opacity-100">
+            Dismiss
+          </button>
+        </div>
+      )}
 
       {/* Main View Container */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
+        {activeTab === 'dashboard' && (
+          <DashboardView leads={leads} userId={auth.user?.id} onOpenExcelUpload={() => setIsExcelModalOpen(true)} />
+        )}
+
         {activeTab === 'campaign' && (
           <BatchCampaignRunner
             leads={leads}
@@ -276,6 +326,8 @@ export default function App() {
             campaignSettings={campaignSettings}
             channelSettings={channelSettings}
             templates={templates}
+            accessToken={auth.accessToken}
+            userId={auth.user?.id}
             onUpdateLead={handleUpdateLead}
             onUpdateSettings={setCampaignSettings}
             onResetAllLeadsToPending={handleResetAllLeadsToPending}
@@ -331,6 +383,10 @@ export default function App() {
             onAddSlot={handleAddCalendarSlot}
             onCancelSlot={handleCancelCalendarSlot}
           />
+        )}
+
+        {activeTab === 'inbox' && (
+          <ConversationsView leads={leads} onUpdateLead={handleUpdateLead} accessToken={auth.accessToken} />
         )}
 
         {activeTab === 'analytics' && <CampaignAnalytics leads={leads} />}

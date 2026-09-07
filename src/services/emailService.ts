@@ -8,6 +8,11 @@ export interface SendEmailPayload {
   channelSettings: ChannelApiSettings;
   senderName?: string;
   senderEmail?: string;
+  /** Signed-in org's Supabase access token — lets the AI email bot learn this lead. */
+  accessToken?: string | null;
+  /** The persisted campaign_recipients row this send belongs to, if any — enables a
+   * Reply-To tracking address so an inbound reply is matched to the right conversation. */
+  campaignRecipientId?: string | null;
 }
 
 export interface SendEmailResult {
@@ -25,10 +30,14 @@ export async function sendEmailDirectOrBackend(payload: SendEmailPayload): Promi
 
   // 1. Call the backend / Vercel serverless API endpoint
   try {
+    const { accessToken, ...requestBody } = payload;
     const res = await fetch('/api/outreach/send-email', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
+      headers: {
+        'Content-Type': 'application/json',
+        ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+      },
+      body: JSON.stringify(requestBody),
     });
 
     const raw = await res.text();

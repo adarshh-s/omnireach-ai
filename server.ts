@@ -4,6 +4,16 @@ import { fileURLToPath } from 'url';
 import { GoogleGenAI } from '@google/genai';
 import { createServer as createViteServer } from 'vite';
 import nodemailer from 'nodemailer';
+import {
+  seedConversationFromLead,
+  verifyWhatsAppWebhook,
+  processWhatsAppWebhookPayload,
+} from './lib/whatsappWebhookHandler';
+import { getSupabaseAdmin } from './lib/supabaseAdmin';
+import { getOrgIdFromAuthHeader } from './lib/supabaseServerAuth';
+import { buildGoogleAuthUrl, handleGoogleOAuthCallback, isGoogleOAuthConfigured } from './lib/googleOAuthFlow';
+import { parseMultipartFields } from './lib/parseMultipart';
+import { verifyEmailWebhookToken, processInboundEmail, seedEmailConversationFromLead, buildEmailReplyToAddress } from './lib/emailWebhookHandler';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -239,7 +249,8 @@ Return strict JSON:
 // API Route: WhatsApp Dispatch Endpoint
 app.post('/api/outreach/send-whatsapp', async (req, res) => {
   try {
-    const { lead, messageText, channelSettings, webhookUrl, templateParams } = req.body;
+    const { lead, messageText, channelSettings, webhookUrl, templateParams, campaignRecipientId } = req.body;
+    const orgId = await getOrgIdFromAuthHeader(req.headers.authorization);
 
     const phoneDigits = (lead?.phone || '').replace(/\D/g, '');
     const directUrl = `https://wa.me/${phoneDigits}?text=${encodeURIComponent(messageText || '')}`;
@@ -367,6 +378,10 @@ app.post('/api/outreach/send-whatsapp', async (req, res) => {
             delivered = true;
             providerResponse = { provider: 'meta_cloud_api', messageId: metaData.messages[0].id, contacts: metaData.contacts };
             console.log(`[Meta Cloud API] Accepted for ${lead?.phone} — id: ${metaData.messages[0].id} — resolved wa_id: ${metaData.contacts?.[0]?.wa_id}`);
+            // Fire-and-forget: let the AI booking bot know this lead once they reply.
+            if (orgId) {
+              seedConversationFromLead(orgId, lead || {}, campaignRecipientId).catch(() => {});
+            }
           } else {
             const baseError = metaData.error?.message || 'Meta Cloud API error';
             errorDetail =
@@ -476,7 +491,9 @@ app.post('/api/outreach/send-whatsapp', async (req, res) => {
 // API Route: Email Dispatch Endpoint
 app.post('/api/outreach/send-email', async (req, res) => {
   try {
-    const { lead, subject, body, channelSettings, webhookUrl, senderName, senderEmail } = req.body;
+    const { lead, subject, body, channelSettings, webhookUrl, senderName, senderEmail, campaignRecipientId } = req.body;
+    const orgId = await getOrgIdFromAuthHeader(req.headers.authorization);
+    const replyTo = buildEmailReplyToAddress(campaignRecipientId) || undefined;
 
     const mailtoUrl = `mailto:${lead?.email || ''}?subject=${encodeURIComponent(subject || '')}&body=${encodeURIComponent(body || '')}`;
 
@@ -510,6 +527,7 @@ app.post('/api/outreach/send-email', async (req, res) => {
             subject: subject || 'Meeting Request',
             text: body || '',
             html: (body || '').replace(/\n/g, '<br/>'),
+            ...(replyTo ? { reply_to: replyTo } : {}),
           }),
         });
 
@@ -536,6 +554,7 @@ app.post('/api/outreach/send-email', async (req, res) => {
                 subject: subject || 'Meeting Request',
                 text: body || '',
                 html: (body || '').replace(/\n/g, '<br/>'),
+                ...(replyTo ? { reply_to: replyTo } : {}),
               }),
             });
             const fallbackText = await fallbackRes.text();
@@ -575,6 +594,7 @@ app.post('/api/outreach/send-email', async (req, res) => {
             from: { email: fromAddress, name: fromName },
             subject: subject || 'Meeting Request',
             content: [{ type: 'text/plain', value: body || '' }],
+            ...(replyTo ? { reply_to: { email: replyTo } } : {}),
           }),
         });
 
@@ -618,6 +638,7 @@ app.post('/api/outreach/send-email', async (req, res) => {
           subject: subject || 'Meeting Request',
           text: body || '',
           html: (body || '').replace(/\n/g, '<br/>'),
+          ...(replyTo ? { replyTo } : {}),
         });
 
         delivered = true;
@@ -641,6 +662,7 @@ app.post('/api/outreach/send-email', async (req, res) => {
         form.append('subject', subject || 'Meeting Request');
         form.append('text', body || '');
         form.append('html', (body || '').replace(/\n/g, '<br/>'));
+        if (replyTo) form.append('h:Reply-To', replyTo);
 
         const mgRes = await fetch(`https://${apiHost}/v3/${domain}/messages`, {
           method: 'POST',
@@ -683,6 +705,11 @@ app.post('/api/outreach/send-email', async (req, res) => {
     } else {
       // Default direct mailto mode
       delivered = true;
+    }
+
+    // Fire-and-forget: let the AI booking bot know this lead once they reply.
+    if (delivered && orgId && replyTo) {
+      seedEmailConversationFromLead(orgId, lead || {}, campaignRecipientId, subject).catch(() => {});
     }
 
     // 3. Optional n8n / Custom Webhook Trigger
@@ -766,6 +793,110 @@ app.post('/api/calendar/book', async (req, res) => {
 // API Route: Get Outreach Dispatch Logs
 app.get('/api/outreach/logs', (req, res) => {
   res.json({ logs: dispatchLogs });
+});
+
+// WhatsApp Webhook Verification — Meta calls this once when you register the webhook URL
+app.get('/api/whatsapp/webhook', (req, res) => {
+  const result = verifyWhatsAppWebhook(req.query as Record<string, unknown>);
+  if (result) {
+    res.status(200).send(result.challenge);
+  } else {
+    res.sendStatus(403);
+  }
+});
+
+// WhatsApp Webhook Receiver — incoming prospect replies, handled by the AI booking bot
+app.post('/api/whatsapp/webhook', async (req, res) => {
+  res.sendStatus(200); // ack immediately; Meta requires a fast response
+  try {
+    await processWhatsAppWebhookPayload(req.body);
+  } catch (err) {
+    console.error('[WhatsApp Webhook] Processing error:', err);
+  }
+});
+
+// Email Webhook Receiver — SendGrid Inbound Parse posts replies here as multipart/form-data.
+// Configure the Destination URL in SendGrid as: https://<domain>/api/email/inbound?token=<EMAIL_INBOUND_WEBHOOK_SECRET>
+app.post('/api/email/inbound', async (req, res) => {
+  if (!verifyEmailWebhookToken(req.query.token as string | undefined)) {
+    return res.sendStatus(403);
+  }
+  res.sendStatus(200); // ack immediately; SendGrid retries on slow/non-2xx responses
+  try {
+    const fields = await parseMultipartFields(req);
+    await processInboundEmail(fields);
+  } catch (err) {
+    console.error('[Email Webhook] Processing error:', err);
+  }
+});
+
+// API Route: List live AI bot conversations for the signed-in org (for the "AI Inbox" UI panel)
+app.get('/api/whatsapp/conversations', async (req, res) => {
+  const supabase = getSupabaseAdmin();
+  if (!supabase) {
+    return res.json({ configured: false, conversations: [] });
+  }
+  const orgId = await getOrgIdFromAuthHeader(req.headers.authorization);
+  if (!orgId) {
+    return res.status(401).json({ error: 'Sign in required.' });
+  }
+  const { data, error } = await supabase
+    .from('whatsapp_conversations')
+    .select('*')
+    .eq('org_id', orgId)
+    .order('last_message_at', { ascending: false })
+    .limit(200);
+  if (error) {
+    return res.status(500).json({ error: error.message });
+  }
+  res.json({ configured: true, conversations: data });
+});
+
+// API Route: List live AI email bot conversations for the signed-in org
+app.get('/api/email/conversations', async (req, res) => {
+  const supabase = getSupabaseAdmin();
+  if (!supabase) {
+    return res.json({ configured: false, conversations: [] });
+  }
+  const orgId = await getOrgIdFromAuthHeader(req.headers.authorization);
+  if (!orgId) {
+    return res.status(401).json({ error: 'Sign in required.' });
+  }
+  const { data, error } = await supabase
+    .from('email_conversations')
+    .select('*')
+    .eq('org_id', orgId)
+    .order('last_message_at', { ascending: false })
+    .limit(200);
+  if (error) {
+    return res.status(500).json({ error: error.message });
+  }
+  res.json({ configured: true, conversations: data });
+});
+
+// API Route: Start the Google Calendar "Connect" OAuth flow for the signed-in org
+app.post('/api/auth/google/connect', async (req, res) => {
+  if (!isGoogleOAuthConfigured()) {
+    return res.status(500).json({ error: 'Google Calendar OAuth is not configured on the server yet.' });
+  }
+  const orgId = await getOrgIdFromAuthHeader(req.headers.authorization);
+  if (!orgId) {
+    return res.status(401).json({ error: 'Sign in required.' });
+  }
+  const authUrl = buildGoogleAuthUrl(orgId);
+  if (!authUrl) {
+    return res.status(500).json({ error: 'Failed to build Google authorization URL.' });
+  }
+  res.json({ authUrl });
+});
+
+// API Route: Google OAuth redirect target — exchanges the code and stores the org's refresh token
+app.get('/api/auth/google/callback', async (req, res) => {
+  const result = await handleGoogleOAuthCallback(req.query.code as string | undefined, req.query.state as string | undefined);
+  const redirectTo = result.ok
+    ? `/?google_calendar=connected`
+    : `/?google_calendar=error&message=${encodeURIComponent(result.error || 'Connection failed')}`;
+  res.redirect(302, redirectTo);
 });
 
 // Health Endpoint

@@ -13,14 +13,18 @@ import {
   MessageSquare,
   Mail,
   Zap,
+  Bot,
+  LayoutDashboard,
 } from 'lucide-react';
 
 export type ActiveTab =
+  | 'dashboard'
   | 'campaign'
   | 'sheets'
   | 'simulator'
   | 'templates'
   | 'calendar'
+  | 'inbox'
   | 'analytics'
   | 'n8n'
   | 'architecture';
@@ -30,6 +34,7 @@ interface HeaderProps {
   setActiveTab: (tab: ActiveTab) => void;
   pendingCount: number;
   scheduledCount: number;
+  inboxCount?: number;
   onOpenExcelUpload: () => void;
   onOpenChannelConfig: () => void;
 }
@@ -47,10 +52,16 @@ export const Header: React.FC<HeaderProps> = ({
   setActiveTab,
   pendingCount,
   scheduledCount,
+  inboxCount,
   onOpenExcelUpload,
   onOpenChannelConfig,
 }) => {
   const tabs: TabItem[] = [
+    {
+      id: 'dashboard',
+      label: 'Dashboard',
+      icon: LayoutDashboard,
+    },
     {
       id: 'campaign',
       label: 'Batch Outreach',
@@ -78,6 +89,12 @@ export const Header: React.FC<HeaderProps> = ({
       label: 'Google Calendar',
       icon: Calendar,
       badge: scheduledCount > 0 ? `${scheduledCount} Booked` : undefined,
+    },
+    {
+      id: 'inbox',
+      label: 'AI Inbox',
+      icon: Bot,
+      badge: inboxCount && inboxCount > 0 ? `${inboxCount} Live` : undefined,
     },
     {
       id: 'analytics',

@@ -1,6 +1,10 @@
+import { seedConversationFromLead } from '../../lib/whatsappWebhookHandler';
+import { getOrgIdFromAuthHeader } from '../../lib/supabaseServerAuth';
+
 interface ApiRequest {
   method?: string;
   body?: any;
+  headers?: Record<string, string | string[] | undefined>;
 }
 
 interface ApiResponse {
@@ -14,7 +18,8 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
   }
 
   try {
-    const { lead, messageText, channelSettings, webhookUrl, templateParams } = req.body || {};
+    const { lead, messageText, channelSettings, webhookUrl, templateParams, campaignRecipientId } = req.body || {};
+    const orgId = await getOrgIdFromAuthHeader(req.headers?.authorization as string | undefined);
     const phoneDigits = (lead?.phone || '').replace(/[^0-9]/g, '');
     const encodedText = encodeURIComponent(messageText || '');
     const directUrl = `https://wa.me/${phoneDigits}?text=${encodedText}`;
@@ -136,6 +141,10 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
         } else if (metaRes.ok && metaData.messages?.[0]?.id) {
           delivered = true;
           providerResponse = { provider: 'meta_cloud_api', messageId: metaData.messages[0].id, contacts: metaData.contacts };
+          // Fire-and-forget: let the AI booking bot know this lead once they reply.
+          if (orgId) {
+            seedConversationFromLead(orgId, lead || {}, campaignRecipientId).catch(() => {});
+          }
         } else {
           const baseError = metaData.error?.message || 'Meta Cloud API error';
           errorDetail =

@@ -198,7 +198,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                 <Clock className="w-4 h-4 text-[#8BA888]" />
                 Available Slots Pool ({openSlots.length})
               </h3>
-              <span className="text-xs text-[#8C847C]">Offered by Voice Agent</span>
+              <span className="text-xs text-[#8C847C]">Offered by AI Booking Bot</span>
             </div>
 
             <div className="space-y-2 max-h-[440px] overflow-y-auto pr-1">

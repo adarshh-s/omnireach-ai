@@ -1,8 +1,11 @@
 import nodemailer from 'nodemailer';
+import { getOrgIdFromAuthHeader } from '../../lib/supabaseServerAuth';
+import { buildEmailReplyToAddress, seedEmailConversationFromLead } from '../../lib/emailWebhookHandler';
 
 interface ApiRequest {
   method?: string;
   body?: any;
+  headers?: Record<string, string | string[] | undefined>;
 }
 
 interface ApiResponse {
@@ -16,7 +19,9 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
   }
 
   try {
-    const { lead, subject, body, channelSettings, webhookUrl, senderName, senderEmail } = req.body || {};
+    const { lead, subject, body, channelSettings, webhookUrl, senderName, senderEmail, campaignRecipientId } = req.body || {};
+    const orgId = await getOrgIdFromAuthHeader(req.headers?.authorization as string | undefined);
+    const replyTo = buildEmailReplyToAddress(campaignRecipientId) || undefined;
 
     const mailtoUrl = `mailto:${lead?.email || ''}?subject=${encodeURIComponent(subject || '')}&body=${encodeURIComponent(body || '')}`;
 
@@ -51,6 +56,7 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
             subject: subject || 'Meeting Request',
             text: body || '',
             html: (body || '').replace(/\n/g, '<br/>'),
+            ...(replyTo ? { reply_to: replyTo } : {}),
           }),
         });
 
@@ -77,6 +83,7 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
                 subject: subject || 'Meeting Request',
                 text: body || '',
                 html: (body || '').replace(/\n/g, '<br/>'),
+                ...(replyTo ? { reply_to: replyTo } : {}),
               }),
             });
             const fallbackText = await fallbackRes.text();
@@ -114,6 +121,7 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
             from: { email: fromAddress, name: fromName },
             subject: subject || 'Meeting Request',
             content: [{ type: 'text/plain', value: body || '' }],
+            ...(replyTo ? { reply_to: { email: replyTo } } : {}),
           }),
         });
 
@@ -157,6 +165,7 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
           subject: subject || 'Meeting Request',
           text: body || '',
           html: (body || '').replace(/\n/g, '<br/>'),
+          ...(replyTo ? { replyTo } : {}),
         });
 
         delivered = true;
@@ -178,6 +187,7 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
         form.append('subject', subject || 'Meeting Request');
         form.append('text', body || '');
         form.append('html', (body || '').replace(/\n/g, '<br/>'));
+        if (replyTo) form.append('h:Reply-To', replyTo);
 
         const mgRes = await fetch(`https://${apiHost}/v3/${domain}/messages`, {
           method: 'POST',
@@ -236,6 +246,11 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
       } else if (provider === 'resend' || provider === 'sendgrid') {
         errorDetail = 'API key is missing. Please enter your API key in Settings.';
       }
+    }
+
+    // Fire-and-forget: let the AI booking bot know this lead once they reply.
+    if (delivered && orgId && replyTo) {
+      seedEmailConversationFromLead(orgId, lead || {}, campaignRecipientId, subject).catch(() => {});
     }
 
     const logEntry = {

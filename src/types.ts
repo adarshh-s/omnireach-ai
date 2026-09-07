@@ -41,6 +41,7 @@ export interface Lead {
   isValidPhone: boolean;
   isValidEmail: boolean;
   customFields?: Record<string, string>;
+  optedOut?: boolean;
 }
 
 export interface CalendarSlot {

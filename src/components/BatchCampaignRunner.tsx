@@ -35,6 +35,7 @@ import {
 } from '../utils/outreachEngine';
 import { sendEmailDirectOrBackend } from '../services/emailService';
 import { DEFAULT_TEMPLATES } from '../data/sampleTemplates';
+import { supabase, isSupabaseBrowserConfigured } from '../lib/supabaseClient';
 
 interface BatchCampaignRunnerProps {
   leads: Lead[];
@@ -42,6 +43,8 @@ interface BatchCampaignRunnerProps {
   campaignSettings: CampaignSettings;
   channelSettings: ChannelApiSettings;
   templates: MessageTemplate[];
+  accessToken?: string | null;
+  userId?: string | null;
   onUpdateLead: (lead: Lead) => void;
   onUpdateSettings?: (settings: CampaignSettings) => void;
   onResetAllLeadsToPending?: () => void;
@@ -57,6 +60,8 @@ export const BatchCampaignRunner: React.FC<BatchCampaignRunnerProps> = ({
   campaignSettings,
   channelSettings,
   templates,
+  accessToken,
+  userId,
   onUpdateLead,
   onUpdateSettings,
   onResetAllLeadsToPending,
@@ -88,6 +93,12 @@ export const BatchCampaignRunner: React.FC<BatchCampaignRunnerProps> = ({
   isRunningRef.current = isRunning;
   const isPausedRef = useRef(isPaused);
   isPausedRef.current = isPaused;
+
+  // Persisted campaign tracking (Supabase) — id of the campaign row created when this
+  // run launched, and a lookup from client (lead) id to its campaign_recipients row id,
+  // so per-lead status updates below can also update the persisted recipient record.
+  const currentCampaignIdRef = useRef<string | null>(null);
+  const recipientIdByClientRef = useRef<Record<string, string>>({});
 
   const validLeads = leads.filter((l) => l.isValidPhone || l.isValidEmail);
   const pendingLeads = leads.filter(
@@ -193,13 +204,17 @@ export const BatchCampaignRunner: React.FC<BatchCampaignRunnerProps> = ({
           try {
             const waRes = await fetch('/api/outreach/send-whatsapp', {
               method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
+              headers: {
+                'Content-Type': 'application/json',
+                ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+              },
               body: JSON.stringify({
                 lead,
                 messageText: personalized.whatsApp,
                 channelSettings,
                 webhookUrl: channelSettings.n8nWebhookUrl,
                 templateParams,
+                campaignRecipientId: recipientIdByClientRef.current[lead.id] || null,
               }),
             });
             const waData = await waRes.json();
@@ -263,6 +278,8 @@ export const BatchCampaignRunner: React.FC<BatchCampaignRunnerProps> = ({
               channelSettings,
               senderName: campaignSettings.senderName,
               senderEmail: resolvedSenderEmail,
+              accessToken,
+              campaignRecipientId: recipientIdByClientRef.current[lead.id] || null,
             });
             if (!emRes.delivered) {
               emDeliveryStatus = 'failed';
@@ -300,6 +317,22 @@ export const BatchCampaignRunner: React.FC<BatchCampaignRunnerProps> = ({
         setDispatchLogs((prev) => [...newLogs, ...prev].slice(0, 50));
       }
 
+      // Mirror the status onto the persisted campaign_recipients row, if this run is tracked.
+      const recipientId = recipientIdByClientRef.current[lead.id];
+      if (recipientId && isSupabaseBrowserConfigured && supabase) {
+        supabase
+          .from('campaign_recipients')
+          .update({
+            whatsapp_status: updatedLead.whatsAppStatus,
+            email_status: updatedLead.emailStatus,
+            meeting_booked: updatedLead.status === 'Meeting Scheduled',
+            error_detail: newLogs.find((l) => l.status === 'failed')?.errorDetail || null,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', recipientId)
+          .then(() => {});
+      }
+
       setIsProcessingStep(false);
 
       // Wait for delay before next item
@@ -319,7 +352,56 @@ export const BatchCampaignRunner: React.FC<BatchCampaignRunnerProps> = ({
     };
   }, [isRunning, isPaused, currentIndex]);
 
-  const handleStart = () => {
+  const handleStart = async () => {
+    // Create a persisted campaign + one campaign_recipients row per lead about to be
+    // contacted, so progress is trackable on the Dashboard and in Analytics — not just
+    // held in this component's in-memory run state.
+    if (isSupabaseBrowserConfigured && supabase && userId) {
+      try {
+        const toContact = leads.filter(
+          (l) =>
+            l.status === 'Pending' ||
+            (channelMode === 'whatsapp' && l.whatsAppStatus === 'Pending') ||
+            (channelMode === 'email' && l.emailStatus === 'Pending') ||
+            (channelMode === 'omnichannel' && (l.whatsAppStatus === 'Pending' || l.emailStatus === 'Pending'))
+        );
+
+        const { data: campaign } = await supabase
+          .from('campaigns')
+          .insert({
+            org_id: userId,
+            name: `Campaign — ${new Date().toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' })}`,
+            objective: campaignSettings.customInstructions || null,
+            channels: channelMode === 'omnichannel' ? ['whatsapp', 'email'] : [channelMode],
+            ai_instructions: campaignSettings.customInstructions || null,
+            status: 'running',
+          })
+          .select('id')
+          .single();
+
+        if (campaign?.id && toContact.length > 0) {
+          currentCampaignIdRef.current = campaign.id;
+          const { data: recipients } = await supabase
+            .from('campaign_recipients')
+            .insert(
+              toContact.map((l) => ({
+                campaign_id: campaign.id,
+                org_id: userId,
+                client_id: l.id,
+              }))
+            )
+            .select('id, client_id');
+
+          recipientIdByClientRef.current = {};
+          (recipients || []).forEach((r: { id: string; client_id: string }) => {
+            recipientIdByClientRef.current[r.client_id] = r.id;
+          });
+        }
+      } catch (err) {
+        console.warn('Failed to persist campaign — continuing in local-only mode:', err);
+      }
+    }
+
     setIsRunning(true);
     setIsPaused(false);
   };

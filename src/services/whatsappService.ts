@@ -7,6 +7,12 @@ export interface SendWhatsAppPayload {
   channelSettings: ChannelApiSettings;
   webhookUrl?: string;
   templateParams?: string[];
+  /** Signed-in org's Supabase access token — lets the AI booking bot learn this lead so it
+   * can reply intelligently when they message back. Optional; sending still works without it. */
+  accessToken?: string | null;
+  /** The persisted campaign_recipients row this send belongs to, if any — lets an inbound
+   * reply be traced back to the campaign that triggered it. */
+  campaignRecipientId?: string | null;
 }
 
 export interface SendWhatsAppResult {
@@ -22,10 +28,14 @@ export async function sendWhatsAppDirectOrBackend(payload: SendWhatsAppPayload):
   const provider = payload.channelSettings?.whatsAppProvider || 'web_direct';
 
   try {
+    const { accessToken, ...body } = payload;
     const res = await fetch('/api/outreach/send-whatsapp', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
+      headers: {
+        'Content-Type': 'application/json',
+        ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+      },
+      body: JSON.stringify(body),
     });
 
     const raw = await res.text();
