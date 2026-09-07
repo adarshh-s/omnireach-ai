@@ -33,3 +33,40 @@ export function parseMultipartFields(req: IncomingMessage): Promise<Record<strin
     req.pipe(busboy);
   });
 }
+
+function readRawBody(req: IncomingMessage): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    req.on('data', (chunk) => chunks.push(chunk));
+    req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
+    req.on('error', reject);
+  });
+}
+
+/**
+ * Parses a JSON request body into the same {to, from, subject, text} field shape as
+ * parseMultipartFields — used by our own Cloudflare Email Worker (see cloudflare/email-worker.js),
+ * which forwards inbound mail as JSON instead of SendGrid's multipart/form-data.
+ */
+async function parseJsonFields(req: IncomingMessage): Promise<Record<string, string>> {
+  const raw = await readRawBody(req);
+  if (!raw) return {};
+  try {
+    const data = JSON.parse(raw);
+    const fields: Record<string, string> = {};
+    for (const key of ['to', 'from', 'subject', 'text', 'html']) {
+      if (typeof data[key] === 'string') fields[key] = data[key];
+    }
+    return fields;
+  } catch {
+    return {};
+  }
+}
+
+/** Dispatches to the right parser based on Content-Type — accepts both SendGrid's
+ * multipart/form-data and our own Cloudflare Email Worker's application/json. */
+export function parseInboundEmailFields(req: IncomingMessage): Promise<Record<string, string>> {
+  const contentType = req.headers['content-type'] || '';
+  if (contentType.includes('application/json')) return parseJsonFields(req);
+  return parseMultipartFields(req);
+}

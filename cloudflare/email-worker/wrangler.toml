@@ -1,0 +1,11 @@
+name = "omnireach-email-inbound"
+main = "src/index.js"
+compatibility_date = "2024-09-23"
+compatibility_flags = ["nodejs_compat"]
+
+# Not secret — the public webhook path. Change this if you deploy the main app elsewhere.
+[vars]
+INBOUND_WEBHOOK_BASE_URL = "https://ai-voice-agent-kappa-livid.vercel.app/api/email/inbound"
+
+# INBOUND_WEBHOOK_TOKEN is a secret — do NOT put it here.
+# Set it with: wrangler secret put INBOUND_WEBHOOK_TOKEN
