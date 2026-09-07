@@ -1,4 +1,4 @@
-import { getSupabaseAdmin } from './supabaseAdmin';
+import { getSupabaseAdmin } from './supabaseAdmin.js';
 
 /**
  * Verifies a Supabase access token (from an `Authorization: Bearer <token>` header sent

@@ -1,4 +1,4 @@
-import { verifyWhatsAppWebhook, processWhatsAppWebhookPayload } from '../../lib/whatsappWebhookHandler';
+import { verifyWhatsAppWebhook, processWhatsAppWebhookPayload } from '../../lib/whatsappWebhookHandler.js';
 
 interface ApiRequest {
   method?: string;

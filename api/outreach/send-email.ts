@@ -1,6 +1,6 @@
 import nodemailer from 'nodemailer';
-import { getOrgIdFromAuthHeader } from '../../lib/supabaseServerAuth';
-import { buildEmailReplyToAddress, seedEmailConversationFromLead } from '../../lib/emailWebhookHandler';
+import { getOrgIdFromAuthHeader } from '../../lib/supabaseServerAuth.js';
+import { buildEmailReplyToAddress, seedEmailConversationFromLead } from '../../lib/emailWebhookHandler.js';
 
 interface ApiRequest {
   method?: string;

@@ -1,5 +1,5 @@
-import { seedConversationFromLead } from '../../lib/whatsappWebhookHandler';
-import { getOrgIdFromAuthHeader } from '../../lib/supabaseServerAuth';
+import { seedConversationFromLead } from '../../lib/whatsappWebhookHandler.js';
+import { getOrgIdFromAuthHeader } from '../../lib/supabaseServerAuth.js';
 
 interface ApiRequest {
   method?: string;

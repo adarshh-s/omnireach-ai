@@ -1,6 +1,6 @@
 import type { IncomingMessage } from 'http';
-import { parseMultipartFields } from '../../lib/parseMultipart';
-import { verifyEmailWebhookToken, processInboundEmail } from '../../lib/emailWebhookHandler';
+import { parseMultipartFields } from '../../lib/parseMultipart.js';
+import { verifyEmailWebhookToken, processInboundEmail } from '../../lib/emailWebhookHandler.js';
 
 interface ApiResponse {
   status: (code: number) => ApiResponse;

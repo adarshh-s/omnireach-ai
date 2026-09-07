@@ -1,5 +1,5 @@
-import { getSupabaseAdmin } from './supabaseAdmin';
-import type { CampaignSettings, ChannelApiSettings } from '../src/types';
+import { getSupabaseAdmin } from './supabaseAdmin.js';
+import type { CampaignSettings, ChannelApiSettings } from '../src/types.js';
 
 export async function getOrgProfile(orgId: string): Promise<CampaignSettings | null> {
   const supabase = getSupabaseAdmin();

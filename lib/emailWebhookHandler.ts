@@ -1,4 +1,4 @@
-import { getSupabaseAdmin } from './supabaseAdmin';
+import { getSupabaseAdmin } from './supabaseAdmin.js';
 import {
   getContextFromCampaignRecipientId,
   getContextFromClientId,
@@ -6,12 +6,12 @@ import {
   getOrgChannelSettings,
   getOrgGoogleCalendarToken,
   markClientOptedOut,
-} from './orgSettings';
-import { sendEmailViaOrgProvider } from './emailSender';
-import { runConversationTurn, ConversationTurn } from './conversationEngine';
-import { createMeetingEvent } from './googleCalendar';
-import { getGeminiClient } from './geminiClient';
-import { OPT_OUT_PATTERN, OPT_OUT_REPLY } from './compliance';
+} from './orgSettings.js';
+import { sendEmailViaOrgProvider } from './emailSender.js';
+import { runConversationTurn, ConversationTurn } from './conversationEngine.js';
+import { createMeetingEvent } from './googleCalendar.js';
+import { getGeminiClient } from './geminiClient.js';
+import { OPT_OUT_PATTERN, OPT_OUT_REPLY } from './compliance.js';
 
 /** Verifies the shared secret appended to the Inbound Parse Destination URL, so this
  * endpoint can't be spammed by anyone who finds the URL. */

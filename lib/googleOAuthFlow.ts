@@ -1,6 +1,6 @@
 import { google } from 'googleapis';
-import { signOAuthState, verifyOAuthState } from './googleOAuthState';
-import { saveOrgGoogleCalendarToken } from './orgSettings';
+import { signOAuthState, verifyOAuthState } from './googleOAuthState.js';
+import { saveOrgGoogleCalendarToken } from './orgSettings.js';
 
 function getOAuthClient() {
   const clientId = process.env.GOOGLE_CLIENT_ID;

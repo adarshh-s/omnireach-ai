@@ -1,5 +1,5 @@
-import { getOrgIdFromAuthHeader } from '../../../lib/supabaseServerAuth';
-import { buildGoogleAuthUrl, isGoogleOAuthConfigured } from '../../../lib/googleOAuthFlow';
+import { getOrgIdFromAuthHeader } from '../../../lib/supabaseServerAuth.js';
+import { buildGoogleAuthUrl, isGoogleOAuthConfigured } from '../../../lib/googleOAuthFlow.js';
 
 interface ApiRequest {
   method?: string;

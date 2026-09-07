@@ -1,5 +1,5 @@
 import nodemailer from 'nodemailer';
-import type { ChannelApiSettings } from '../src/types';
+import type { ChannelApiSettings } from '../src/types.js';
 
 export interface SendEmailResult {
   ok: boolean;

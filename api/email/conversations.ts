@@ -1,5 +1,5 @@
-import { getSupabaseAdmin } from '../../lib/supabaseAdmin';
-import { getOrgIdFromAuthHeader } from '../../lib/supabaseServerAuth';
+import { getSupabaseAdmin } from '../../lib/supabaseAdmin.js';
+import { getOrgIdFromAuthHeader } from '../../lib/supabaseServerAuth.js';
 
 interface ApiRequest {
   method?: string;

@@ -1,16 +1,16 @@
-import { getSupabaseAdmin } from './supabaseAdmin';
+import { getSupabaseAdmin } from './supabaseAdmin.js';
 import {
   getOrgIdByPhoneNumberId,
   getOrgProfile,
   getOrgChannelSettings,
   getOrgGoogleCalendarToken,
   markClientOptedOut,
-} from './orgSettings';
-import { sendWhatsAppText } from './whatsappSender';
-import { runConversationTurn, ConversationTurn } from './conversationEngine';
-import { createMeetingEvent } from './googleCalendar';
-import { getGeminiClient } from './geminiClient';
-import { OPT_OUT_PATTERN, OPT_OUT_REPLY } from './compliance';
+} from './orgSettings.js';
+import { sendWhatsAppText } from './whatsappSender.js';
+import { runConversationTurn, ConversationTurn } from './conversationEngine.js';
+import { createMeetingEvent } from './googleCalendar.js';
+import { getGeminiClient } from './geminiClient.js';
+import { OPT_OUT_PATTERN, OPT_OUT_REPLY } from './compliance.js';
 
 export function verifyWhatsAppWebhook(query: Record<string, unknown>): { challenge: string } | null {
   const mode = query['hub.mode'];

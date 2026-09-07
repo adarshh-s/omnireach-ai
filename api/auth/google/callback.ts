@@ -1,4 +1,4 @@
-import { handleGoogleOAuthCallback } from '../../../lib/googleOAuthFlow';
+import { handleGoogleOAuthCallback } from '../../../lib/googleOAuthFlow.js';
 
 interface ApiRequest {
   method?: string;
