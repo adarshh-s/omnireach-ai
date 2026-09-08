@@ -24,13 +24,15 @@ export default async function handler(req: IncomingMessage & { method?: string; 
     return res.status(403).json({ error: 'Invalid webhook token' });
   }
 
-  // Ack immediately — SendGrid retries on slow/non-2xx responses.
-  res.status(200).json({ received: true });
-
+  // Must await fully before responding — Vercel's Node runtime does not reliably keep a
+  // serverless function alive for work started after the response is sent, so an
+  // "ack now, process after" pattern here silently drops the processing mid-flight.
   try {
     const fields = await parseInboundEmailFields(req);
     await processInboundEmail(fields);
   } catch (err) {
     console.error('[Email Webhook] Processing error:', err);
   }
+
+  return res.status(200).json({ received: true });
 }

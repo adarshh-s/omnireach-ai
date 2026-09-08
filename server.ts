@@ -400,12 +400,12 @@ app.get('/api/whatsapp/webhook', (req, res) => {
 
 // WhatsApp Webhook Receiver — incoming prospect replies, handled by the AI booking bot
 app.post('/api/whatsapp/webhook', async (req, res) => {
-  res.sendStatus(200); // ack immediately; Meta requires a fast response
   try {
     await processWhatsAppWebhookPayload(req.body);
   } catch (err) {
     console.error('[WhatsApp Webhook] Processing error:', err);
   }
+  res.sendStatus(200);
 });
 
 // Email Webhook Receiver — SendGrid Inbound Parse posts replies as multipart/form-data;
@@ -415,7 +415,6 @@ app.post('/api/email/inbound', async (req, res) => {
   if (!verifyEmailWebhookToken(req.query.token as string | undefined)) {
     return res.sendStatus(403);
   }
-  res.sendStatus(200); // ack immediately; SendGrid retries on slow/non-2xx responses
   try {
     const contentType = req.headers['content-type'] || '';
     let fields: Record<string, string>;
@@ -433,6 +432,7 @@ app.post('/api/email/inbound', async (req, res) => {
   } catch (err) {
     console.error('[Email Webhook] Processing error:', err);
   }
+  res.sendStatus(200);
 });
 
 // Headless dispatcher for country-peak-time-scheduled campaign sends — see

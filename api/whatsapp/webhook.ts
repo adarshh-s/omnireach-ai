@@ -22,15 +22,17 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
   }
 
   if (req.method === 'POST') {
-    // Ack immediately — Meta requires a fast response and will retry/disable the
-    // webhook if it doesn't get one within a few seconds.
-    res.status(200).json({ received: true });
+    // Must await fully before responding — Vercel's Node runtime does not reliably keep
+    // a serverless function alive for work started after the response is sent (unlike a
+    // long-running Express process), so an "ack now, process after" pattern here silently
+    // drops the processing mid-flight. Meta's webhook timeout is generous enough (~20s)
+    // to tolerate the extra latency from the AI call + WhatsApp send happening first.
     try {
       await processWhatsAppWebhookPayload(req.body);
     } catch (err) {
       console.error('[WhatsApp Webhook] Processing error:', err);
     }
-    return;
+    return res.status(200).json({ received: true });
   }
 
   return res.status(405).json({ error: 'Method not allowed' });
