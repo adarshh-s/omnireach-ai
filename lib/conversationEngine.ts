@@ -28,6 +28,28 @@ export interface RunConversationTurnParams {
 
 const VALID_STATUSES: ConversationResult['status'][] = ['active', 'confirmed', 'declined', 'handoff'];
 
+// gemini-flash-latest is Google's rolling alias for the current recommended flash model —
+// used as a fallback so a transient outage/overload on the pinned primary model doesn't
+// take the whole booking bot down.
+const PRIMARY_MODEL = 'gemini-3.8-flash';
+const FALLBACK_MODEL = 'gemini-flash-latest';
+
+async function generateWithFallback(aiClient: GoogleGenAI, prompt: string) {
+  let lastErr: unknown;
+  for (const model of [PRIMARY_MODEL, FALLBACK_MODEL]) {
+    try {
+      return await aiClient.models.generateContent({
+        model,
+        contents: prompt,
+        config: { responseMimeType: 'application/json' },
+      });
+    } catch (err) {
+      lastErr = err;
+    }
+  }
+  throw lastErr;
+}
+
 export async function runConversationTurn(params: RunConversationTurnParams): Promise<ConversationResult> {
   const {
     aiClient,
@@ -89,11 +111,7 @@ Rules:
 - When proposing times, always offer 1-2 concrete options (e.g. "would tomorrow 3 PM or Thursday 11 AM work?") instead of an open-ended "when works for you?".
 - "meeting.date" must be ${todayDateStr} or a later date. "meeting.time" must be 24-hour HH:MM.`;
 
-  const response = await aiClient.models.generateContent({
-    model: 'gemini-3.8-flash',
-    contents: prompt,
-    config: { responseMimeType: 'application/json' },
-  });
+  const response = await generateWithFallback(aiClient, prompt);
 
   try {
     const parsed = JSON.parse(response.text || '{}');
