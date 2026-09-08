@@ -73,6 +73,15 @@ export async function processWhatsAppWebhookPayload(body: any): Promise<void> {
     .eq('phone', fromPhone)
     .maybeSingle();
 
+  // Meta guarantees at-least-once webhook delivery and retries if our response is slow —
+  // without this, a retry racing the original in-flight request can overwrite newer
+  // conversation state (e.g. a just-confirmed meeting) with a stale reply.
+  const inboundMessageId: string | undefined = message.id;
+  if (inboundMessageId && existing?.last_inbound_message_id === inboundMessageId) {
+    console.log('[WhatsApp Bot] Duplicate delivery of message', inboundMessageId, '— skipping.');
+    return;
+  }
+
   const history: ConversationTurn[] = existing?.history || [];
   const nowIso = new Date().toISOString();
   history.push({ role: 'user', text: incomingText, timestamp: nowIso });
@@ -104,6 +113,7 @@ export async function processWhatsAppWebhookPayload(body: any): Promise<void> {
         lead_company: existing?.lead_company,
         status: 'declined',
         history,
+        last_inbound_message_id: inboundMessageId || existing?.last_inbound_message_id,
         collected: existing?.collected || {},
         meeting_date: existing?.meeting_date,
         meeting_time: existing?.meeting_time,
@@ -190,6 +200,7 @@ export async function processWhatsAppWebhookPayload(body: any): Promise<void> {
       lead_company: existing?.lead_company,
       status: finalStatus,
       history,
+      last_inbound_message_id: inboundMessageId || existing?.last_inbound_message_id,
       collected: existing?.collected || {},
       meeting_date: meetingDateTimeIso ? meetingDateTimeIso.slice(0, 10) : existing?.meeting_date,
       meeting_time: meetingDateTimeIso ? result.meeting?.time : existing?.meeting_time,

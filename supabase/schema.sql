@@ -257,3 +257,12 @@ alter table campaign_recipients add column if not exists payload jsonb not null 
 create index if not exists idx_campaign_recipients_due
   on campaign_recipients(scheduled_for) where scheduled_for is not null;
 -- Inserts/updates come only from the inbound webhook handler (service_role key, bypasses RLS).
+
+-- ---------------------------------------------------------------------------
+-- Idempotency guard for the WhatsApp webhook. Meta guarantees at-least-once
+-- delivery and retries if our response is slow — without tracking the last
+-- processed message id, a retry racing the original in-flight request can
+-- overwrite newer conversation state (e.g. a just-confirmed meeting) with a
+-- stale reply. See lib/whatsappWebhookHandler.ts.
+-- ---------------------------------------------------------------------------
+alter table whatsapp_conversations add column if not exists last_inbound_message_id text;
