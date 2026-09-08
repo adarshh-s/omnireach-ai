@@ -32,7 +32,11 @@ export function verifyWhatsAppWebhook(query: Record<string, unknown>): { challen
 export async function processWhatsAppWebhookPayload(body: any): Promise<void> {
   const value = body?.entry?.[0]?.changes?.[0]?.value;
   const message = value?.messages?.[0];
-  if (!message || message.type !== 'text') return; // ignore status callbacks, media, reactions, etc.
+  if (!message || message.type !== 'text') {
+    console.log('[WhatsApp Bot] Ignoring non-text/empty payload:', JSON.stringify(body)?.slice(0, 500));
+    return; // ignore status callbacks, media, reactions, etc.
+  }
+  console.log('[WhatsApp Bot] Processing text message from', message.from, '- phoneNumberId:', value?.metadata?.phone_number_id);
 
   const phoneNumberId: string | undefined = value?.metadata?.phone_number_id;
   const fromPhone: string = message.from;
