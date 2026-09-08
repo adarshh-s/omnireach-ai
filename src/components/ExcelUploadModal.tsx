@@ -54,6 +54,7 @@ export const ExcelUploadModal: React.FC<ExcelUploadModalProps> = ({
     company: '',
     email: '',
     notes: '',
+    country: '',
   });
   const [selectedCountryCode, setSelectedCountryCode] = useState(defaultCountryCode || '+91');
   const [appendMode, setAppendMode] = useState(false);
@@ -130,11 +131,11 @@ export const ExcelUploadModal: React.FC<ExcelUploadModalProps> = ({
 
   const downloadSampleExcel = () => {
     const csvContent =
-      'Name,Company,Phone,Email,Notes\n' +
-      'Alex Morgan,Acme AI Solutions,9876543211,alex.morgan@acmesolutions.example,Interested in automated WhatsApp & Email outreach\n' +
-      'John Doe,Global Logistics,+15551234567,john@globallogistics.com,Follow-up demo for Q3 calendar invite\n' +
-      'Sarah Connor,Cyberdyne Systems,+447911123456,sarah@cyberdyne.org,Requested pricing overview\n' +
-      'Rajesh Kumar,TechCorp India,9876543210,rajesh@techcorp.in,Wants WhatsApp demo link\n';
+      'Name,Company,Phone,Email,Country,Notes\n' +
+      'Alex Morgan,Acme AI Solutions,9876543211,alex.morgan@acmesolutions.example,United Arab Emirates,Interested in automated WhatsApp & Email outreach\n' +
+      'John Doe,Global Logistics,+15551234567,john@globallogistics.com,United States,Follow-up demo for Q3 calendar invite\n' +
+      'Sarah Connor,Cyberdyne Systems,+447911123456,sarah@cyberdyne.org,United Kingdom,Requested pricing overview\n' +
+      'Rajesh Kumar,TechCorp India,9876543210,rajesh@techcorp.in,India,Wants WhatsApp demo link\n';
 
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
@@ -360,6 +361,26 @@ export const ExcelUploadModal: React.FC<ExcelUploadModalProps> = ({
                         </option>
                       ))}
                     </select>
+                  </div>
+
+                  {/* Country */}
+                  <div className="p-3 rounded-2xl bg-white border border-[#E8E4DF]">
+                    <label className="block text-xs font-semibold text-[#2D2926] mb-1">
+                      Country
+                    </label>
+                    <select
+                      value={mapping.country}
+                      onChange={(e) => setMapping({ ...mapping, country: e.target.value })}
+                      className="w-full bg-[#FAF9F6] border border-[#E8E4DF] rounded-xl px-3 py-2 text-xs text-[#2D2926] focus:outline-none"
+                    >
+                      <option value="">-- Optional: Select Country --</option>
+                      {headers.map((h) => (
+                        <option key={h} value={h}>
+                          {h}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="text-[10px] text-[#8C847C] mt-1">Used for peak-local-time campaign scheduling</p>
                   </div>
                 </div>
               </div>

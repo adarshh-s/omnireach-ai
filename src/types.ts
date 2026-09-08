@@ -12,6 +12,7 @@ export type LeadStatus =
 export type ChannelDeliveryStatus =
   | 'Pending'
   | 'Queued'
+  | 'Sending'
   | 'Sent'
   | 'Delivered'
   | 'Read'
@@ -27,6 +28,7 @@ export interface Lead {
   phone: string;
   rawPhone?: string;
   email: string;
+  country?: string;
   status: LeadStatus;
   whatsAppStatus: ChannelDeliveryStatus;
   emailStatus: ChannelDeliveryStatus;
@@ -42,6 +44,9 @@ export interface Lead {
   isValidEmail: boolean;
   customFields?: Record<string, string>;
   optedOut?: boolean;
+  /** ISO timestamp — set client-side when country peak-time scheduling defers this lead's
+   * send; not persisted to Supabase (the authoritative copy lives on campaign_recipients). */
+  scheduledFor?: string;
 }
 
 export interface CalendarSlot {
@@ -148,6 +153,7 @@ export interface ColumnMapping {
   company: string;
   email: string;
   notes: string;
+  country: string;
 }
 
 export interface OutreachDispatchLog {

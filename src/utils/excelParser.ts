@@ -101,12 +101,15 @@ export function autoDetectColumns(headers: string[]): ColumnMapping {
     findMatch(['notes', 'note', 'message', 'comment', 'description', 'context', 'remarks']) ||
     '';
 
+  const countryCol = findMatch(['country', 'nation', 'countryname']) || '';
+
   return {
     name: nameCol,
     phone: phoneCol,
     company: companyCol,
     email: emailCol,
     notes: notesCol,
+    country: countryCol,
   };
 }
 
@@ -193,6 +196,7 @@ export function convertRowsToLeads(
     const rawCompany = String(row[mapping.company] || '').trim();
     const rawEmail = String(row[mapping.email] || '').trim();
     const rawNotes = String(row[mapping.notes] || '').trim();
+    const rawCountry = String(row[mapping.country] || '').trim();
 
     const { formatted, isValid: isPhoneValid } = sanitizePhoneNumber(rawPhone, defaultCountryCode);
     const isEmailValid = Boolean(rawEmail && rawEmail.includes('@') && rawEmail.includes('.'));
@@ -210,6 +214,7 @@ export function convertRowsToLeads(
       phone: formatted || String(rawPhone || ''),
       rawPhone: String(rawPhone || ''),
       email: rawEmail,
+      country: rawCountry,
       status: 'Pending',
       whatsAppStatus: 'Pending',
       emailStatus: 'Pending',

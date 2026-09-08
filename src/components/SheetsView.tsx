@@ -61,6 +61,7 @@ export const SheetsView: React.FC<SheetsViewProps> = ({
     company: '',
     phone: '',
     email: '',
+    country: '',
     notes: '',
   });
 
@@ -77,6 +78,7 @@ export const SheetsView: React.FC<SheetsViewProps> = ({
         : `+91${newLead.phone.replace(/\D/g, '')}`,
       rawPhone: newLead.phone,
       email: newLead.email,
+      country: newLead.country || undefined,
       status: 'Pending',
       whatsAppStatus: 'Pending',
       emailStatus: 'Pending',
@@ -87,7 +89,7 @@ export const SheetsView: React.FC<SheetsViewProps> = ({
     };
 
     onAddLead(lead);
-    setNewLead({ name: '', company: '', phone: '', email: '', notes: '' });
+    setNewLead({ name: '', company: '', phone: '', email: '', country: '', notes: '' });
     setIsAddingLead(false);
   };
 
@@ -364,6 +366,18 @@ export const SheetsView: React.FC<SheetsViewProps> = ({
                 className="w-full bg-[#FAF8F5] border border-[#DDD6CB] rounded-lg px-3 py-1.5 text-xs text-[#2D2926]"
               />
             </div>
+            <div>
+              <label className="block text-[11px] font-semibold text-[#8C847C] mb-1">
+                Country
+              </label>
+              <input
+                type="text"
+                placeholder="e.g. United Arab Emirates"
+                value={newLead.country}
+                onChange={(e) => setNewLead({ ...newLead, country: e.target.value })}
+                className="w-full bg-[#FAF8F5] border border-[#DDD6CB] rounded-lg px-3 py-1.5 text-xs text-[#2D2926]"
+              />
+            </div>
           </div>
 
           <div className="flex justify-end gap-2">
@@ -435,6 +449,15 @@ export const SheetsView: React.FC<SheetsViewProps> = ({
                 type="email"
                 value={editingLead.email}
                 onChange={(e) => setEditingLead({ ...editingLead, email: e.target.value })}
+                className="w-full bg-[#FAF8F5] border border-[#DDD6CB] rounded-lg px-3 py-1.5 text-xs"
+              />
+            </div>
+            <div>
+              <label className="block text-[11px] font-semibold text-[#8C847C] mb-1">Country</label>
+              <input
+                type="text"
+                value={editingLead.country || ''}
+                onChange={(e) => setEditingLead({ ...editingLead, country: e.target.value })}
                 className="w-full bg-[#FAF8F5] border border-[#DDD6CB] rounded-lg px-3 py-1.5 text-xs"
               />
             </div>
@@ -526,7 +549,10 @@ export const SheetsView: React.FC<SheetsViewProps> = ({
                       {/* Name & Company */}
                       <td className="py-3 px-3">
                         <div className="font-semibold text-[#2D2926]">{lead.name}</div>
-                        <div className="text-[11px] text-[#7A7269]">{lead.company}</div>
+                        <div className="text-[11px] text-[#7A7269]">
+                          {lead.company}
+                          {lead.country && <span className="text-[#A69F96]"> · {lead.country}</span>}
+                        </div>
                       </td>
 
                       {/* Phone */}
@@ -553,6 +579,14 @@ export const SheetsView: React.FC<SheetsViewProps> = ({
                             <Clock className="w-2.5 h-2.5" /> Pending
                           </span>
                         )}
+                        {lead.whatsAppStatus === 'Queued' && (
+                          <span
+                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-amber-50 text-amber-700 border border-amber-200"
+                            title={lead.scheduledFor ? `Scheduled for ${new Date(lead.scheduledFor).toLocaleString()}` : undefined}
+                          >
+                            <Clock className="w-2.5 h-2.5" /> Scheduled
+                          </span>
+                        )}
                         {lead.whatsAppStatus === 'Delivered' && (
                           <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-[#E8F5E9] text-[#128C7E] border border-[#C8E6C9]">
                             <CheckCircle2 className="w-2.5 h-2.5 text-[#25D366]" /> Delivered
@@ -575,6 +609,14 @@ export const SheetsView: React.FC<SheetsViewProps> = ({
                         {lead.emailStatus === 'Pending' && (
                           <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-[#F5F2EB] text-[#7A7269] border border-[#DDD6CB]">
                             <Clock className="w-2.5 h-2.5" /> Pending
+                          </span>
+                        )}
+                        {lead.emailStatus === 'Queued' && (
+                          <span
+                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-amber-50 text-amber-700 border border-amber-200"
+                            title={lead.scheduledFor ? `Scheduled for ${new Date(lead.scheduledFor).toLocaleString()}` : undefined}
+                          >
+                            <Clock className="w-2.5 h-2.5" /> Scheduled
                           </span>
                         )}
                         {(lead.emailStatus === 'Sent' || lead.emailStatus === 'Delivered') && (

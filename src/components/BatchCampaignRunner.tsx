@@ -36,6 +36,7 @@ import {
 import { sendEmailDirectOrBackend } from '../services/emailService';
 import { DEFAULT_TEMPLATES } from '../data/sampleTemplates';
 import { supabase, isSupabaseBrowserConfigured } from '../lib/supabaseClient';
+import { computeNextPeakSendTime } from '../../lib/countryTiming';
 
 interface BatchCampaignRunnerProps {
   leads: Lead[];
@@ -80,6 +81,7 @@ export const BatchCampaignRunner: React.FC<BatchCampaignRunnerProps> = ({
   );
   const [delaySeconds, setDelaySeconds] = useState<number>(campaignSettings.delayBetweenMessagesSeconds || 2);
   const [autoOpenApps, setAutoOpenApps] = useState<boolean>(false);
+  const [usePeakScheduling, setUsePeakScheduling] = useState<boolean>(false);
   
   // Real-time live dispatch previews
   const [currentLead, setCurrentLead] = useState<Lead | null>(null);
@@ -154,6 +156,78 @@ export const BatchCampaignRunner: React.FC<BatchCampaignRunnerProps> = ({
       setCurrentEmailSubject(personalized.emailSubject);
       setCurrentEmailBody(personalized.emailBody);
 
+      // Computed once, used by both the immediate-send path below and the peak-time
+      // scheduling path (which needs it stored for the headless dispatcher).
+      const useTemplate =
+        (channelMode === 'omnichannel' || channelMode === 'whatsapp') &&
+        (channelSettings.whatsAppProvider === 'twilio' || channelSettings.whatsAppProvider === 'cloud_api') &&
+        channelSettings.whatsappMessageMode === 'template';
+      const templateParams = useTemplate
+        ? resolveTemplateVariables(
+            (channelSettings.whatsAppProvider === 'twilio'
+              ? channelSettings.twilioContentVariables
+              : channelSettings.whatsappTemplateVariables) || [],
+            lead,
+            campaignSettings,
+            availableSlots
+          )
+        : undefined;
+      const resolvedSenderEmail =
+        channelSettings.smtpFromEmail ||
+        (channelSettings.emailProvider === 'resend' && (!campaignSettings.senderEmail || campaignSettings.senderEmail.includes('.example'))
+          ? 'onboarding@resend.dev'
+          : campaignSettings.senderEmail || 'onboarding@resend.dev');
+
+      // Country peak-time scheduling: if enabled and it isn't currently peak local time
+      // for this lead's country, don't send now — persist it as Queued (with the
+      // already-generated message content) for the headless dispatcher
+      // (api/cron/dispatch-scheduled.ts) to send later, and move straight to the next lead.
+      if (usePeakScheduling) {
+        const scheduleFor = computeNextPeakSendTime(lead.country, new Date());
+        if (scheduleFor.getTime() - Date.now() > 60000) {
+          const queuedLead: Lead = {
+            ...lead,
+            status: 'In Progress',
+            whatsAppStatus: channelMode === 'omnichannel' || channelMode === 'whatsapp' ? 'Queued' : lead.whatsAppStatus,
+            emailStatus: channelMode === 'omnichannel' || channelMode === 'email' ? 'Queued' : lead.emailStatus,
+            whatsAppMessage: personalized.whatsApp,
+            emailSubject: personalized.emailSubject,
+            emailBody: personalized.emailBody,
+            scheduledFor: scheduleFor.toISOString(),
+          };
+          onUpdateLead(queuedLead);
+
+          const recipientId = recipientIdByClientRef.current[lead.id];
+          if (recipientId && isSupabaseBrowserConfigured && supabase) {
+            await supabase
+              .from('campaign_recipients')
+              .update({
+                whatsapp_status: queuedLead.whatsAppStatus,
+                email_status: queuedLead.emailStatus,
+                scheduled_for: scheduleFor.toISOString(),
+                payload: {
+                  whatsappMessage: personalized.whatsApp,
+                  templateParams,
+                  emailSubject: personalized.emailSubject,
+                  emailBody: personalized.emailBody,
+                  senderName: campaignSettings.senderName,
+                  senderEmail: resolvedSenderEmail,
+                },
+                updated_at: new Date().toISOString(),
+              })
+              .eq('id', recipientId);
+          }
+
+          setIsProcessingStep(false);
+          if (isRunningRef.current && !isPausedRef.current) {
+            timeoutId = setTimeout(() => {
+              setCurrentIndex((prev) => prev + 1);
+            }, 300);
+          }
+          return;
+        }
+      }
+
       // 2. Dispatch according to channel mode
       const nowFormatted = new Date().toLocaleString([], {
         month: 'short',
@@ -183,22 +257,7 @@ export const BatchCampaignRunner: React.FC<BatchCampaignRunnerProps> = ({
             window.open(waLink, '_blank');
           }
 
-          // Trigger backend relay
-          const useTemplate =
-            (channelMode === 'omnichannel' || channelMode === 'whatsapp') &&
-            (channelSettings.whatsAppProvider === 'twilio' || channelSettings.whatsAppProvider === 'cloud_api') &&
-            channelSettings.whatsappMessageMode === 'template';
-          const templateParams = useTemplate
-            ? resolveTemplateVariables(
-                (channelSettings.whatsAppProvider === 'twilio'
-                  ? channelSettings.twilioContentVariables
-                  : channelSettings.whatsappTemplateVariables) || [],
-                lead,
-                campaignSettings,
-                availableSlots
-              )
-            : undefined;
-
+          // Trigger backend relay (useTemplate/templateParams computed above)
           let waDeliveryStatus = 'delivered';
           let waErrorDetail = '';
           try {
@@ -262,15 +321,11 @@ export const BatchCampaignRunner: React.FC<BatchCampaignRunnerProps> = ({
             window.open(mailLink, '_blank');
           }
 
-          // Trigger email relay (handles both Vercel client-direct and backend server)
+          // Trigger email relay (handles both Vercel client-direct and backend server;
+          // resolvedSenderEmail computed above)
           let emDeliveryStatus = 'delivered';
           let emErrorDetail = '';
           try {
-            const resolvedSenderEmail = channelSettings.resendFromEmail || 
-              (channelSettings.emailProvider === 'resend' && (!campaignSettings.senderEmail || campaignSettings.senderEmail.includes('.example'))
-                ? 'onboarding@resend.dev'
-                : campaignSettings.senderEmail || 'onboarding@resend.dev');
-
             const emRes = await sendEmailDirectOrBackend({
               lead,
               subject: personalized.emailSubject,
@@ -654,6 +709,30 @@ export const BatchCampaignRunner: React.FC<BatchCampaignRunnerProps> = ({
               <RotateCcw className="w-3.5 h-3.5" />
             </button>
           </div>
+        </div>
+
+        {/* Country Peak-Time Scheduling Toggle */}
+        <div className="mt-4 flex items-center justify-between gap-3 p-3 bg-[#FAF8F5] rounded-xl border border-[#E8E4DF]">
+          <div className="flex items-center gap-2.5">
+            <Clock className="w-4 h-4 text-[#8C847C] shrink-0" />
+            <div>
+              <div className="text-xs font-semibold text-[#2D2926]">Country Peak-Time Scheduling</div>
+              <div className="text-[11px] text-[#8C847C]">
+                {usePeakScheduling
+                  ? "Messages send during each client's local business hours (needs a Country column on the lead)."
+                  : 'Off — every message sends immediately regardless of the client\'s country.'}
+              </div>
+            </div>
+          </div>
+          <label className="relative inline-flex items-center cursor-pointer shrink-0">
+            <input
+              type="checkbox"
+              checked={usePeakScheduling}
+              onChange={(e) => setUsePeakScheduling(e.target.checked)}
+              className="sr-only peer"
+            />
+            <div className="w-11 h-6 bg-[#E8E4DF] peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-[#E8E4DF] after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#8BA888]"></div>
+          </label>
         </div>
 
         {/* Live Channel Status & Automation Diagnostics */}

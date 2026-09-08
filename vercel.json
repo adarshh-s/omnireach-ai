@@ -11,5 +11,11 @@
       "source": "/(.*)",
       "destination": "/index.html"
     }
+  ],
+  "crons": [
+    {
+      "path": "/api/cron/dispatch-scheduled",
+      "schedule": "0 6 * * *"
+    }
   ]
 }

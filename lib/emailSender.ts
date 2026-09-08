@@ -4,41 +4,56 @@ import type { ChannelApiSettings } from '../src/types.js';
 export interface SendEmailResult {
   ok: boolean;
   error?: string;
+  provider: string;
+  providerResponse?: unknown;
 }
 
 export interface SendEmailParams {
   to: string;
+  toName?: string;
   subject: string;
   body: string;
   fromName: string;
+  /** Preferred from-address for resend/sendgrid/mailgun (falls back to settings.smtpFromEmail, then a safe default). Ignored for smtp, which always uses settings.smtpFromEmail. */
+  fromAddress?: string;
   replyTo?: string;
+  /** Only used when settings.emailProvider === 'webhook'. */
+  webhookUrl?: string;
+  webhookContext?: unknown;
+}
+
+function isUsableAddress(addr: string | undefined | null): addr is string {
+  return Boolean(addr && addr.includes('@') && !addr.includes('.example'));
 }
 
 /**
- * Sends one email using an org's own configured provider — used by the AI booking bot's
- * replies. Mirrors the provider branching in the outbound send-email routes, kept as a
- * separate lean implementation (same precedent as lib/whatsappSender.ts vs. the full
- * send-whatsapp route) since the bot's needs are simpler (no template mode, no dispatch log).
+ * Sends one email using an org's own configured provider (Resend / SendGrid / SMTP /
+ * Mailgun / webhook). Shared by the AI booking bot's replies, the interactive campaign
+ * send route (api/outreach/send-email.ts, server.ts), and the headless scheduled
+ * dispatcher (api/cron/dispatch-scheduled.ts) — all three need identical send behavior.
  */
 export async function sendEmailViaOrgProvider(
   settings: ChannelApiSettings | null | undefined,
   params: SendEmailParams
 ): Promise<SendEmailResult> {
   const provider = settings?.emailProvider || 'mailto_direct';
-  const { to, subject, body, fromName, replyTo } = params;
+  const { to, toName, subject, body, fromName, replyTo, webhookUrl, webhookContext } = params;
   const html = body.replace(/\n/g, '<br/>');
 
+  const preferredFrom = isUsableAddress(params.fromAddress)
+    ? params.fromAddress
+    : isUsableAddress(settings?.smtpFromEmail)
+      ? settings!.smtpFromEmail!.trim()
+      : undefined;
+
   if (provider === 'resend' && settings?.emailApiKey) {
-    try {
-      const fromAddress =
-        settings.smtpFromEmail && !settings.smtpFromEmail.includes('.example') && settings.smtpFromEmail.includes('@')
-          ? settings.smtpFromEmail.trim()
-          : 'onboarding@resend.dev';
+    const apiKey = settings.emailApiKey.trim();
+    const sendResend = async (fromAddr: string) => {
       const res = await fetch('https://api.resend.com/emails', {
         method: 'POST',
-        headers: { Authorization: `Bearer ${settings.emailApiKey.trim()}`, 'Content-Type': 'application/json' },
+        headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          from: `${fromName} <${fromAddress}>`,
+          from: `${fromName} <${fromAddr}>`,
           to: [to],
           subject,
           text: body,
@@ -46,11 +61,33 @@ export async function sendEmailViaOrgProvider(
           ...(replyTo ? { reply_to: replyTo } : {}),
         }),
       });
-      const data = await res.json().catch(() => ({}));
-      if (res.ok && data.id) return { ok: true };
-      return { ok: false, error: data.message || 'Resend API error' };
+      const text = await res.text();
+      let data: any = {};
+      try {
+        data = JSON.parse(text);
+      } catch {
+        data = { message: text };
+      }
+      return { res, data };
+    };
+
+    try {
+      const firstFrom = preferredFrom || 'onboarding@resend.dev';
+      let { res, data } = await sendResend(firstFrom);
+
+      // Automatic fallback: if a custom domain is unverified, retry with onboarding@resend.dev
+      const looksLikeDomainError =
+        !res.ok && (data.message?.toLowerCase().includes('domain') || data.message?.toLowerCase().includes('verify') || data.name === 'validation_error');
+      if (looksLikeDomainError && firstFrom !== 'onboarding@resend.dev') {
+        ({ res, data } = await sendResend('onboarding@resend.dev'));
+      }
+
+      if (res.ok && (data.id || res.status === 200 || res.status === 201)) {
+        return { ok: true, provider, providerResponse: { id: data.id } };
+      }
+      return { ok: false, provider, error: data.message || data.error || 'Resend API error', providerResponse: data };
     } catch (err: any) {
-      return { ok: false, error: err.message || 'Failed connecting to Resend' };
+      return { ok: false, provider, error: err.message || 'Failed connecting to Resend' };
     }
   }
 
@@ -60,18 +97,24 @@ export async function sendEmailViaOrgProvider(
         method: 'POST',
         headers: { Authorization: `Bearer ${settings.emailApiKey.trim()}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          personalizations: [{ to: [{ email: to }] }],
-          from: { email: settings.smtpFromEmail || 'no-reply@example.com', name: fromName },
+          personalizations: [{ to: [{ email: to, name: toName }] }],
+          from: { email: preferredFrom || 'no-reply@example.com', name: fromName },
           subject,
           content: [{ type: 'text/plain', value: body }],
           ...(replyTo ? { reply_to: { email: replyTo } } : {}),
         }),
       });
-      if (res.status === 202 || res.ok) return { ok: true };
-      const data = await res.json().catch(() => ({}));
-      return { ok: false, error: data.errors?.[0]?.message || 'SendGrid API error' };
+      const text = await res.text();
+      let data: any = {};
+      try {
+        data = JSON.parse(text);
+      } catch {
+        data = { message: text };
+      }
+      if (res.status === 202 || res.ok) return { ok: true, provider, providerResponse: { status: 'queued_accepted' } };
+      return { ok: false, provider, error: data.errors?.[0]?.message || data.message || 'SendGrid API error', providerResponse: data };
     } catch (err: any) {
-      return { ok: false, error: err.message || 'Failed connecting to SendGrid' };
+      return { ok: false, provider, error: err.message || 'Failed connecting to SendGrid' };
     }
   }
 
@@ -85,7 +128,7 @@ export async function sendEmailViaOrgProvider(
         auth: { user: settings.smtpUser.trim(), pass: settings.smtpPass },
       });
       const fromAddress = (settings.smtpFromEmail || settings.smtpUser).trim();
-      await transporter.sendMail({
+      const info = await transporter.sendMail({
         from: `${fromName} <${fromAddress}>`,
         to,
         subject,
@@ -93,9 +136,9 @@ export async function sendEmailViaOrgProvider(
         html,
         ...(replyTo ? { replyTo } : {}),
       });
-      return { ok: true };
+      return { ok: true, provider, providerResponse: { messageId: info.messageId } };
     } catch (err: any) {
-      return { ok: false, error: err.message || 'Failed to send via SMTP' };
+      return { ok: false, provider, error: err.message || 'Failed to send via SMTP' };
     }
   }
 
@@ -103,9 +146,9 @@ export async function sendEmailViaOrgProvider(
     try {
       const domain = settings.mailgunDomain.trim();
       const apiHost = settings.mailgunRegion === 'eu' ? 'api.eu.mailgun.net' : 'api.mailgun.net';
-      const fromAddress = settings.smtpFromEmail && !settings.smtpFromEmail.includes('.example') ? settings.smtpFromEmail : `postmaster@${domain}`;
+      const fromAddr = preferredFrom || `postmaster@${domain}`;
       const form = new URLSearchParams();
-      form.append('from', `${fromName} <${fromAddress}>`);
+      form.append('from', `${fromName} <${fromAddr}>`);
       form.append('to', to);
       form.append('subject', subject);
       form.append('text', body);
@@ -120,13 +163,55 @@ export async function sendEmailViaOrgProvider(
         },
         body: form.toString(),
       });
-      if (res.ok) return { ok: true };
-      const data = await res.json().catch(() => ({}));
-      return { ok: false, error: data.message || 'Mailgun API error' };
+      const text = await res.text();
+      let data: any = {};
+      try {
+        data = JSON.parse(text);
+      } catch {
+        data = { message: text };
+      }
+      if (res.ok && data.id) return { ok: true, provider, providerResponse: { id: data.id } };
+      return { ok: false, provider, error: data.message || 'Mailgun API error', providerResponse: data };
     } catch (err: any) {
-      return { ok: false, error: err.message || 'Failed connecting to Mailgun' };
+      return { ok: false, provider, error: err.message || 'Failed connecting to Mailgun' };
     }
   }
 
-  return { ok: false, error: 'No email provider configured for this organization.' };
+  if (provider === 'webhook' && (webhookUrl || settings?.n8nWebhookUrl)) {
+    try {
+      const targetUrl = webhookUrl || settings?.n8nWebhookUrl!;
+      const res = await fetch(targetUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          event: 'email_outreach_dispatch',
+          timestamp: new Date().toISOString(),
+          lead: webhookContext,
+          subject,
+          body,
+        }),
+      });
+      if (res.ok) return { ok: true, provider, providerResponse: { status: res.status } };
+      return { ok: false, provider, error: `Webhook returned HTTP ${res.status}`, providerResponse: { status: res.status } };
+    } catch (err: any) {
+      return { ok: false, provider, error: err.message || 'Webhook trigger failed' };
+    }
+  }
+
+  if (provider === 'smtp') {
+    return { ok: false, provider, error: 'SMTP host, username, and password are required. Please configure them in Settings.' };
+  }
+  if (provider === 'mailgun') {
+    return { ok: false, provider, error: 'Mailgun API key and domain are required. Please configure them in Settings.' };
+  }
+  if (provider === 'resend' || provider === 'sendgrid') {
+    return { ok: false, provider, error: 'API key is missing. Please enter your API key in Settings.' };
+  }
+  if (provider === 'webhook') {
+    return { ok: false, provider, error: 'A webhook URL is required. Set it under n8n / Webhook in Settings.' };
+  }
+  // mailto_direct (default): actual delivery happens client-side via a mailto: link for
+  // interactive sends — this isn't a failure, so no error message (matches prior route behavior).
+  // For headless callers (AI bot replies, scheduled dispatch) this correctly surfaces as ok:false.
+  return { ok: false, provider };
 }

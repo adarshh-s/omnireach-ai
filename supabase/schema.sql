@@ -242,4 +242,18 @@ alter table email_conversations enable row level security;
 drop policy if exists "org can read own email conversations" on email_conversations;
 create policy "org can read own email conversations" on email_conversations
   for select using (auth.uid() = org_id);
+
+-- ---------------------------------------------------------------------------
+-- Country-based peak-time campaign scheduling. A recipient with a non-null
+-- scheduled_for isn't sent immediately by the browser — it's picked up later
+-- by the headless dispatcher (api/cron/dispatch-scheduled.ts), which needs the
+-- pre-generated message content (payload) since it has no browser/AI context.
+-- ---------------------------------------------------------------------------
+alter table clients add column if not exists country text;
+
+alter table campaign_recipients add column if not exists scheduled_for timestamptz;
+alter table campaign_recipients add column if not exists payload jsonb not null default '{}'::jsonb;
+
+create index if not exists idx_campaign_recipients_due
+  on campaign_recipients(scheduled_for) where scheduled_for is not null;
 -- Inserts/updates come only from the inbound webhook handler (service_role key, bypasses RLS).
