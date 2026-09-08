@@ -1,10 +1,10 @@
 -- OmniReach AI — multi-tenant schema
--- Run this once in your Supabase project's SQL editor (Project → SQL Editor → New query).
+-- Run this in your Supabase project's SQL editor (Project → SQL Editor → New query).
 -- Each Supabase Auth user is treated as one organization/workspace (org_id = auth.uid()).
 --
--- NOTE: this replaces the earlier single-tenant version of this file. If you already ran
--- the old version (whatsapp_conversations / bot_settings without org_id), this drops and
--- recreates those tables — safe since the bot feature had not been used in production yet.
+-- This file is additive/idempotent and safe to re-run any time you pull a schema change —
+-- every statement is a `create table if not exists` / `alter table ... add column if not
+-- exists` / `create index if not exists`, so re-running never touches existing data.
 
 -- ---------------------------------------------------------------------------
 -- Org identity & business profile (replaces CampaignSettings' identity fields)
@@ -87,8 +87,7 @@ grant execute on function get_google_calendar_status() to authenticated;
 -- ---------------------------------------------------------------------------
 -- WhatsApp AI booking bot — conversation state, now scoped per org
 -- ---------------------------------------------------------------------------
-drop table if exists whatsapp_conversations;
-create table whatsapp_conversations (
+create table if not exists whatsapp_conversations (
   id uuid primary key default gen_random_uuid(),
   org_id uuid not null references auth.users(id) on delete cascade,
   phone text not null,             -- WhatsApp number, digits only, no '+' (e.g. 971501234567)
@@ -109,10 +108,11 @@ create table whatsapp_conversations (
   updated_at timestamptz not null default now()
 );
 
-create unique index idx_whatsapp_conversations_org_phone on whatsapp_conversations(org_id, phone);
-create index idx_whatsapp_conversations_last_message on whatsapp_conversations(last_message_at desc);
+create unique index if not exists idx_whatsapp_conversations_org_phone on whatsapp_conversations(org_id, phone);
+create index if not exists idx_whatsapp_conversations_last_message on whatsapp_conversations(last_message_at desc);
 
 alter table whatsapp_conversations enable row level security;
+drop policy if exists "org can read own conversations" on whatsapp_conversations;
 create policy "org can read own conversations" on whatsapp_conversations
   for select using (auth.uid() = org_id);
 -- Inserts/updates come only from the webhook handler (service_role key, bypasses RLS).
